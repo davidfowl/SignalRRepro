@@ -3,10 +3,17 @@ using SignalRRepro.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.UseSockets(o =>
+{
+    // Essential disable buffering for writes to the socket transport
+    o.MaxWriteBufferSize = 2;
+});
+
 // Add services to the container.
 builder.Services.AddRazorPages();
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<MessageSender>();
+builder.Services.AddSingleton(typeof(HubConnectionManager<>));
 // builder.Services.AddHostedService<Logger>();
 
 var app = builder.Build();
@@ -27,6 +34,7 @@ app.UseRouting();
 app.UseAuthorization();
 
 app.MapRazorPages();
-app.MapHub<MyHub>("/myHub");
+// Essential disable buffering for writes in signalr's transport layer
+app.MapHub<MyHub>("/myHub", o => o.TransportMaxBufferSize = 2);
 
 app.Run();

@@ -1,61 +1,18 @@
 using Microsoft.AspNetCore.SignalR;
 using SignalRRepro.Hubs;
 using System.Diagnostics;
-using System.Threading.Channels;
 
 namespace SignalRRepro;
 
 public class MessageSender : BackgroundService, IDisposable
 {
     private readonly byte[] _dummyData = new byte[2048];
-    private readonly IHubContext<MyHub>? _hub;
-    private readonly Channel<Message> _channel;
-    private readonly Task _consumeTask;
+    private readonly HubConnectionManager<MyHub> _manager;
 
-    public MessageSender(IHubContext<MyHub> hub)
+    public MessageSender(HubConnectionManager<MyHub> manager)
     {
-        _hub = hub;
+        _manager = manager;
         Random.Shared.NextBytes(_dummyData);
-        _channel = Channel.CreateBounded<Message>(new BoundedChannelOptions(5) { FullMode = BoundedChannelFullMode.DropOldest }, item =>
-        {
-            // Console.WriteLine($"Dropped: {item}");
-        });
-        _consumeTask = Consume();
-    }
-
-    private async Task Consume()
-    {
-        var cts = new CancellationTokenSource();
-
-        await foreach (var msg in _channel.Reader.ReadAllAsync())
-        {
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            try
-            {
-                var sw = Stopwatch.StartNew();
-                var task = _hub!.Clients.All.SendAsync("clock", msg, cts.Token);
-                bool delay = !task.IsCompletedSuccessfully;
-                await task;
-                sw.Stop();
-                if (delay)
-                {
-                    // Print a message if there's back pressure
-                    Console.WriteLine($"Took {sw.ElapsedMilliseconds}ms, Buffer={_channel.Reader.Count}, Queue Delay={DateTime.UtcNow.Subtract(msg.SentTime).TotalMilliseconds}ms");
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // It turns out this never fires. The token is passed to each client independently.
-                Console.WriteLine("Cancelled send");
-            }
-
-            // Reuse the cancellation token as well as it hasn't timed out
-            if (!cts.TryReset())
-            {
-                cts.Dispose();
-                cts = new();
-            }
-        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -67,17 +24,26 @@ public class MessageSender : BackgroundService, IDisposable
         {
             var dt = DateTime.UtcNow;
             var message = new Message { SentTime = dt, time = dt.ToString("O"), id = count++, data = _dummyData };
-            _channel.Writer.TryWrite(message);
+
+            _manager.Broadcast(async (id, c, state) =>
+            {
+                var message = (Message)state;
+
+                // using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var sw = Stopwatch.StartNew();
+                var task = c.SendAsync("clock", message);
+                bool delay = !task.IsCompletedSuccessfully;
+                await task;
+                sw.Stop();
+                if (delay)
+                {
+                    // Print a message if there's back pressure
+                    Console.WriteLine($"{id}: Backpressure! Took {sw.ElapsedMilliseconds}ms, id={message.id}, Behind={count - message.id} messages");
+                }
+
+            },
+            message);
         }
-    }
-
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        _channel.Writer.TryComplete();
-
-        await base.StopAsync(cancellationToken);
-
-        await _consumeTask;
     }
 
     private class Message
