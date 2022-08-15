@@ -45,6 +45,8 @@ function startClient() {
         for (let i = 0; i < iterations; i++) {
             beBusy();
         }
+        // This will send the ack back to the server
+        return message.id;
     });
 
     connection

@@ -31,7 +31,7 @@ public class MessageSender : BackgroundService, IDisposable
 
                 // using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 var sw = Stopwatch.StartNew();
-                var task = c.SendAsync("clock", message);
+                var task = c.InvokeAsync<int>("clock", message);
                 bool delay = !task.IsCompletedSuccessfully;
                 await task;
                 sw.Stop();
@@ -40,7 +40,6 @@ public class MessageSender : BackgroundService, IDisposable
                     // Print a message if there's back pressure
                     Console.WriteLine($"{id}: Backpressure! Took {sw.ElapsedMilliseconds}ms, id={message.id}, Behind={count - message.id} messages");
                 }
-
             },
             message);
         }
